@@ -1,98 +1,98 @@
 package main
 
 import (
-	"encoding/csv"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
-type DBToCsv interface {
+// DBToCsvParser writes a database client's tabular output as CSV.
+type DBToCsvParser interface {
 	Execute(content string) error
 }
 
-type postgreDBToCsv struct {
-	w *csv.Writer
-}
-
-func NewPostgreDBToCsv(file io.Writer) *postgreDBToCsv {
-	return &postgreDBToCsv{w: csv.NewWriter(file)}
-}
-
-func (p *postgreDBToCsv) Execute(content string) error {
-	defer p.w.Flush()
-
-	lines := strings.Split(content, "\n")
-	header, err := p.parseHeader(lines[0])
-	if err != nil {
-		return err
-	}
-
-	if err := p.w.Write(header); err != nil {
-		return err
-	}
-
-	if err := p.parseRows(lines[2:]); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (p *postgreDBToCsv) parseHeader(header string) ([]string, error) {
-	headerContent := strings.Split(header, "|")
-	headerContentTrimmed := make([]string, 0, len(headerContent))
-	for _, h := range headerContent {
-		headerContentTrimmed = append(headerContentTrimmed, strings.TrimSpace(h))
-	}
-	return headerContentTrimmed, nil
-}
-
-func (p *postgreDBToCsv) parseRows(lines []string) error {
-	for _, line := range lines {
-		if !strings.Contains(line, "|") {
-			continue
-		}
-
-		row := strings.Split(line, "|")
-		rowTrimmed := make([]string, 0, len(row))
-		for _, r := range row {
-			trimmed := strings.TrimSpace(r)
-			if len(trimmed) > 0 {
-				rowTrimmed = append(rowTrimmed, trimmed)
-			}
-		}
-
-		if err := p.w.Write(rowTrimmed); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	content, err := readInput()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("read standard input: %w", err)
 	}
-	f, err := os.Create("test.csv")
+
+	fileName, err := getOutputFileName()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("choose output file: %w", err)
 	}
-	defer f.Close()
 
-	p := NewPostgreDBToCsv(f)
-	p.Execute(content)
+	file, err := os.Create(fileName)
+	if err != nil {
+		return fmt.Errorf("create CSV file: %w", err)
+	}
+	defer file.Close()
 
+	parser, err := NewParserForOutput(file, content)
+	if err != nil {
+		return err
+	}
+	if err := parser.Execute(content); err != nil {
+		return fmt.Errorf("convert database output: %w", err)
+	}
+
+	fmt.Println(fileName)
+	return nil
 }
 
-func readInput() (string, error) {
-	b, err := os.ReadFile("test.txt") // TODO: we just receive from stdin
+// getOutputFileName returns a unique CSV path in the user's Documents directory.
+func getOutputFileName() (string, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 
-	return string(b), nil
+	return filepath.Join(home, "Documents", uuid.NewString()+".csv"), nil
+}
+
+// readInput reads all text piped to the program from standard input.
+func readInput() (string, error) {
+	content, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// NewParserForOutput returns the parser selected for the supplied database output.
+func NewParserForOutput(w io.Writer, content string) (DBToCsvParser, error) {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	switch {
+	case isPostgresFormat(lines):
+		return NewPostgreParser(w), nil
+	case isMySQLFormat(lines):
+		return nil, nil
+	default:
+		return nil, errors.New("unsupported database output format")
+	}
+}
+
+func isPostgresFormat(lines []string) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	rowCount := regexp.MustCompile(`^\(\d+ rows?\)$`)
+	return rowCount.MatchString(strings.TrimSpace(lines[len(lines)-1]))
+}
+
+func isMySQLFormat(lines []string) bool {
+	return false
 }
