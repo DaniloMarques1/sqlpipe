@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -30,18 +31,9 @@ func run() error {
 		return fmt.Errorf("read standard input: %w", err)
 	}
 
-	fileName, err := getOutputFileName()
-	if err != nil {
-		return fmt.Errorf("choose output file: %w", err)
-	}
+	var buffer bytes.Buffer
 
-	file, err := os.Create(fileName)
-	if err != nil {
-		return fmt.Errorf("create CSV file: %w", err)
-	}
-	defer file.Close()
-
-	parser, err := NewParserForOutput(file, content)
+	parser, err := NewParserForOutput(&buffer, content)
 	if err != nil {
 		return err
 	}
@@ -49,8 +41,32 @@ func run() error {
 		return fmt.Errorf("convert database output: %w", err)
 	}
 
+	file, fileName, err := getOutputFile()
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := io.Copy(file, &buffer); err != nil {
+		return fmt.Errorf("writing to csv file: %w", err)
+	}
+
 	fmt.Println(fileName)
 	return nil
+}
+
+func getOutputFile() (*os.File, string, error) {
+	fileName, err := getOutputFileName()
+	if err != nil {
+		return nil, "", fmt.Errorf("choose output file: %w", err)
+	}
+
+	file, err := os.Create(fileName)
+	if err != nil {
+		return nil, "", fmt.Errorf("create CSV file: %w", err)
+	}
+
+	return file, fileName, nil
 }
 
 // getOutputFileName returns a unique CSV path in the user's Documents directory.
