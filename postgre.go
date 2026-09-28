@@ -26,14 +26,11 @@ func (p *postgreParser) Execute(content string) error {
 		return errors.New("psql output is missing its header separator")
 	}
 
-	header, err := p.parseHeader(lines[0])
+	err := p.parseHeader(lines[0])
 	if err != nil {
 		return err
 	}
 
-	if err := p.w.Write(header); err != nil {
-		return err
-	}
 	if err := p.parseRows(lines[2:]); err != nil {
 		return err
 	}
@@ -41,13 +38,18 @@ func (p *postgreParser) Execute(content string) error {
 	return p.w.Error()
 }
 
-func (p *postgreParser) parseHeader(header string) ([]string, error) {
+func (p *postgreParser) parseHeader(header string) error {
 	headerContent := strings.Split(header, "|")
 	headerContentTrimmed := make([]string, 0, len(headerContent))
 	for _, h := range headerContent {
 		headerContentTrimmed = append(headerContentTrimmed, strings.TrimSpace(h))
 	}
-	return headerContentTrimmed, nil
+
+	if err := p.w.Write(headerContentTrimmed); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (p *postgreParser) parseRows(lines []string) error {

@@ -9,14 +9,21 @@ import (
 )
 
 func TestParseHeader(t *testing.T) {
-	parser := NewPostgreParser(io.Discard)
-	header, err := parser.parseHeader("id | codigo_rastreio | cliente nome")
+	var output bytes.Buffer
+	parser := NewPostgreParser(&output)
+	err := parser.parseHeader("id | codigo_rastreio | cliente nome")
 	if err != nil {
 		t.Fatalf("parseHeader() error = %v", err)
 	}
-	want := []string{"id", "codigo_rastreio", "cliente nome"}
-	if !reflect.DeepEqual(header, want) {
-		t.Fatalf("parseHeader() = %#v, want %#v", header, want)
+
+	parser.w.Flush()
+	rows, err := csv.NewReader(&output).ReadAll()
+	if err != nil {
+		t.Fatalf("reading generated CSV: %v", err)
+	}
+	want := [][]string{{"id", "codigo_rastreio", "cliente nome"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("CSV records = %#v, want %#v", rows, want)
 	}
 }
 
